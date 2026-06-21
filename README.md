@@ -76,6 +76,6 @@ Expect frequent changes and incomplete features.
 
 ---
 
-## 📜 License
+## License
 
 GPL v3.0

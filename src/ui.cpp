@@ -3,14 +3,14 @@
 #include <QApplication>
 #include <QMainWindow>
 
-#include <QWidget>
+#include <QStackedWidget>
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QFileDialog>
 #include <QString>
 #include <QPushButton>
 
-void openFileDialog(QMainWindow& window, QLabel* label) {
+QString openFileDialog(QMainWindow& window) {
     QString file = QFileDialog::getOpenFileName(
         &window,
         "Open File",
@@ -18,35 +18,62 @@ void openFileDialog(QMainWindow& window, QLabel* label) {
         "Video Files (*.mp4 *.mov *.mkv)"
     );
 
-    if (!file.isEmpty()) {
-        label->setText("Selected File: " + file);
-    }
+    return file;
 }
 
 QWidget* createUI(QMainWindow& window, QLabel*& label) {
-    QWidget* central = new QWidget();
-    window.setCentralWidget(central);
+    QStackedWidget* stack = new QStackedWidget();
+    window.setCentralWidget(stack);
 
-    central->setStyleSheet("background-color: #1e1e1e;");
+    stack->setStyleSheet("background-color: #1e1e1e;");
 
-    QVBoxLayout* layout = new QVBoxLayout(central);
-    layout->setSpacing(30);
+    QWidget *startPage = new QWidget();
+    QWidget *editorPage = new QWidget();
 
-    layout->addStretch();
+    QVBoxLayout* startLayout = new QVBoxLayout(startPage);
+    QVBoxLayout* editorLayout = new QVBoxLayout(editorPage);
+
+    startLayout->setSpacing(30);
+
+    startLayout->addStretch();
 
     label = new QLabel("Selected File: none");
     label->setStyleSheet("color: white; font-size: 30px; font-weight: bold;");
-    layout->addWidget(label, 0, Qt::AlignCenter);
+    startLayout->addWidget(label, 0, Qt::AlignCenter);
 
     QPushButton* btn = new QPushButton("Open File");
     btn->setStyleSheet("color: white; font-size: 25px;");
-    layout->addWidget(btn, 0, Qt::AlignCenter);
+    startLayout->addWidget(btn, 0, Qt::AlignCenter);
 
-    layout->addStretch();
+    startLayout->addStretch();
 
-    QObject::connect(btn, &QPushButton::clicked, [&window, label]() {
-        openFileDialog(window, label);
+    QObject::connect(btn, &QPushButton::clicked, [&window, stack]() {
+        QString file = openFileDialog(window);
+
+        if (!file.isEmpty()) {
+            stack->setCurrentIndex(1);
+        }
     });
 
-    return central;
+    QLabel *videoBox = new QLabel("Video Preview");
+    videoBox->setMinimumSize(800, 450);
+    videoBox->setStyleSheet("background-color: black; color: white;");
+    videoBox->setAlignment(Qt::AlignCenter);
+
+    QWidget *container = new QWidget();
+    container->setFixedSize(900, 500);
+
+    QVBoxLayout *containerLayout = new QVBoxLayout(container);
+    containerLayout->addWidget(videoBox);
+
+    QVBoxLayout *wrapper = new QVBoxLayout();
+    wrapper->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    wrapper->addWidget(container);
+
+    editorLayout->addLayout(wrapper);
+
+    stack->addWidget(startPage);
+    stack->addWidget(editorPage);
+
+    return stack;
 }

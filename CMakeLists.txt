@@ -23,10 +23,27 @@ else()
     target_compile_options(nyva PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+# Qt
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia)
 
 target_link_libraries(nyva PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    Qt6::Multimedia
 )
+
+# PkgConfig
+find_package(PkgConfig REQUIRED)
+
+# FFmpeg
+pkg_check_modules(FFMPEG REQUIRED
+    libavformat
+    libavcodec
+    libavutil
+    libswscale
+    libswresample
+)
+
+target_include_directories(nyva PRIVATE ${FFMPEG_INCLUDE_DIRS})
+target_link_libraries(nyva PRIVATE ${FFMPEG_LIBRARIES})

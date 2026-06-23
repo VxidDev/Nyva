@@ -74,6 +74,29 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
     wrapper->addWidget(videoBox);
     editorLayout->addLayout(wrapper);
 
+    QHBoxLayout *stateButtons = new QHBoxLayout();
+    stateButtons->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+
+    QPushButton* playButton = new QPushButton("▶");
+    playButton->setStyleSheet("color: white; font-size: 15px;");
+
+    QObject::connect(playButton, &QPushButton::clicked, [=]() {
+        playerState.isPlaying = true;
+    });
+
+
+    QPushButton* stopButton = new QPushButton("⏸");
+    stopButton->setStyleSheet("color: white; font-size: 15px;");
+
+    QObject::connect(stopButton, &QPushButton::clicked, [=]() {
+        playerState.isPlaying = false;
+        playerState.clockRunning = false;
+    });
+
+    stateButtons->addWidget(playButton);
+    stateButtons->addWidget(stopButton);
+    editorLayout->addLayout(stateButtons);
+
     stack->addWidget(startPage);
     stack->addWidget(editorPage);
 
@@ -82,12 +105,14 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
     renderTimer->setInterval(1); // poll at ~1ms; PTS logic controls actual display rate
 
     QObject::connect(renderTimer, &QTimer::timeout, [=]() {
+        if (!playerState.isPlaying) return;
+
         double pts = 0.0;
         if (!playerState.frames.peekPts(pts)) return;
 
         // Anchor the clock on the very first frame
         if (!playerState.clockRunning.load()) {
-            playerState.startPts  = pts;
+            playerState.startPts = pts;
             playerState.wallClock.restart();
             playerState.clockRunning = true;
         }
@@ -121,6 +146,7 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
         auto stopThread = [](QThread *th) {
             if (th) { th->wait(); delete th; }
         };
+
         stopThread(demuxTh); demuxTh = nullptr;
         stopThread(videoTh); videoTh = nullptr;
         stopThread(audioTh); audioTh = nullptr;

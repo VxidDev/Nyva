@@ -26,6 +26,11 @@ class DemuxThread : public QThread {
             AVPacket *pkt = av_packet_alloc();
 
             while (!state->stopRequested) {
+                if (!state->isPlaying) {
+                    QThread::msleep(5);
+                    continue;
+                }
+
                 int ret = av_read_frame(fmt, pkt);
                 if (ret < 0) break; // EOF or error
 
@@ -64,6 +69,11 @@ class VideoDecodeThread : public QThread {
             int lastW = 0, lastH = 0;
 
             while (true) {
+                if (!state->isPlaying) {
+                    QThread::msleep(5);
+                    continue;
+                }
+
                 AVPacket *pkt = state->videoPackets.pop();
                 if (!pkt) {
                     // flushing
@@ -123,7 +133,7 @@ class VideoDecodeThread : public QThread {
                     );
 
                     QImage owned = img.copy();
-
+                    
                     double pts = (frame->pts != AV_NOPTS_VALUE)
                                 ? frame->pts * av_q2d(timeBase)
                                 : 0.0;
@@ -171,8 +181,26 @@ protected:
 
         AVFrame *af = av_frame_alloc();
 
-        while (true) {
+        while (!state->stopRequested) {
+            if (!state->isPlaying) {
+                msleep(5);
+                continue;
+            }
+
+            if (state->audioReset) {
+                sink->stop();
+                device->close();
+
+                delete sink;
+
+                sink = new QAudioSink(format);
+                device = sink->start();
+
+                state->audioReset = false;
+            }
+
             AVPacket *pkt = state->audioPackets.pop();
+
             if (!pkt) {
                 avcodec_send_packet(audioCtx, nullptr); // flush
             } else {

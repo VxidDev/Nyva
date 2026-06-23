@@ -22,7 +22,7 @@ struct PacketQueue {
     QMutex mu;
     QWaitCondition notFull;
     QWaitCondition notEmpty;
-    std::atomic<bool> flushing{false};
+    bool flushing = false;
 
     // Push a packet; blocks if full (unless flushing)
     void push(AVPacket *pkt) {
@@ -59,19 +59,17 @@ struct PacketQueue {
     }
 
     void flush() {
+        QMutexLocker lk(&mu);
+
         flushing = true;
+
+        while (!q.empty()) {
+            av_packet_free(&q.front());
+            q.pop();
+        }
 
         notFull.notify_all();
         notEmpty.notify_all();
-
-        QMutexLocker lk(&mu);
-
-        while (!q.empty()) { 
-            av_packet_free(&q.front()); 
-            q.pop(); 
-        }
-
-        flushing = false;
     }
 };
 
@@ -153,16 +151,27 @@ struct PlayerState {
     // EOF / stop signals
     std::atomic<bool> demuxDone{false};
     std::atomic<bool> stopRequested{false};
-
+    std::atomic<bool> isPlaying{false};
+    std::atomic<bool> audioReset{false};
+    
     void reset() {
         stopRequested = true;
+
         videoPackets.flush();
         audioPackets.flush();
         frames.flush();
+
         stopRequested = false;
+
         demuxDone = false;
         clockRunning = false;
         startPts = -1.0;
+        isPlaying = false;
+        audioReset = false;
+
+        videoPackets.flushing = false;
+        audioPackets.flushing = false;
+        frames.flushing = false;
     }
 
     double elapsedSecs() const {

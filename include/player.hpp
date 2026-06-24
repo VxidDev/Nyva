@@ -153,6 +153,9 @@ struct PlayerState {
     std::atomic<bool> stopRequested{false};
     std::atomic<bool> isPlaying{false};
     std::atomic<bool> audioReset{false};
+
+    // Sound 
+    std::atomic<float> volume = 1.0f;
     
     void reset() {
         stopRequested = true;

@@ -171,12 +171,14 @@ protected:
 
         SwrContext *swr = nullptr;
         AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
+
         swr_alloc_set_opts2(
             &swr,
             &outLayout, AV_SAMPLE_FMT_S16, 48000,
             &audioCtx->ch_layout, audioCtx->sample_fmt, audioCtx->sample_rate,
             0, nullptr
         );
+
         swr_init(swr);
 
         AVFrame *af = av_frame_alloc();
@@ -233,8 +235,24 @@ protected:
                     (const uint8_t **)af->data, af->nb_samples
                 );
 
-                if (written > 0)
-                    device->write((const char *)outData, written * 2 * sizeof(int16_t));
+                if (written > 0) {
+                    int16_t *samples = (int16_t*)outData;
+                    
+                    int totalSamples = written * 2; // stereo = 2 channels
+
+                    float volume = state->volume.load();
+
+                    for (int i = 0; i < totalSamples; i++) {
+                        int val = (int)(samples[i] * volume);
+
+                        if (val > 32767) val = 32767;
+                        if (val < -32768) val = -32768;
+
+                        samples[i] = (int16_t)val;
+                    }
+                        
+                    device->write((const char *)outData, totalSamples * sizeof(int16_t));
+                }
 
                 av_freep(&outData);
             }

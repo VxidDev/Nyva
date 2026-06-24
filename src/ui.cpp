@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QTimer>
 #include <QShortcut>
+#include <QSlider>
 
 extern "C" {
     #include <libavformat/avformat.h>
@@ -45,16 +46,16 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
     stack->setStyleSheet("background-color: #1e1e1e;");
 
     // Pages
-    QWidget *startPage  = new QWidget();
+    QWidget *startPage = new QWidget();
     QWidget *editorPage = new QWidget();
-    QVBoxLayout *startLayout  = new QVBoxLayout(startPage);
+    QVBoxLayout *startLayout = new QVBoxLayout(startPage);
     QVBoxLayout *editorLayout = new QVBoxLayout(editorPage);
 
     // Start page
     startLayout->setSpacing(30);
     startLayout->addStretch();
 
-    label = new QLabel("Selected File: none");
+    label = new QLabel("Nyva - Select File");
     label->setStyleSheet("color: white; font-size: 30px; font-weight: bold;");
     startLayout->addWidget(label, 0, Qt::AlignCenter);
 
@@ -76,9 +77,11 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
     editorLayout->addLayout(wrapper);
 
     QHBoxLayout *stateButtons = new QHBoxLayout();
-    stateButtons->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    stateButtons->setAlignment(Qt::AlignTop);
+    stateButtons->setContentsMargins(10, 5, 10, 5);
 
     QPushButton* playToggle = new QPushButton("▶");
+    playToggle->setMinimumHeight(40);
     playToggle->setStyleSheet("color: white; font-size: 15px;");
 
     auto togglePlay = [playToggle]() {
@@ -96,7 +99,40 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
     QShortcut *spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), editorPage);
     QObject::connect(spaceShortcut, &QShortcut::activated, togglePlay);
 
+    QSlider *volumeSlider = new QSlider(Qt::Horizontal);
+    volumeSlider->setRange(0, 100);
+    volumeSlider->setValue(100);
+    volumeSlider->setFixedWidth(200);
+
+    QLabel *volLabel = new QLabel("100%");
+    volLabel->setStyleSheet("color: white; font-size: 15px;");
+    volLabel->setFixedWidth(volLabel->sizeHint().width());
+    volLabel->setContentsMargins(0,0,0,0);
+
+    QObject::connect(volumeSlider, &QSlider::valueChanged, [volLabel](int v) {
+        playerState.volume = v * 0.01;
+        volLabel->setText(QString::number(v) + "%");
+    });
+
+    QWidget *rightWidget = new QWidget();
+    QHBoxLayout *rightLayout = new QHBoxLayout(rightWidget);
+    rightLayout->setContentsMargins(0,0,0,0);
+    rightLayout->setSpacing(2);
+
+    rightLayout->addWidget(volLabel);
+    rightLayout->addWidget(volumeSlider);
+    
+    rightWidget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+
+    QWidget *leftMirror = new QWidget();
+    leftMirror->setFixedWidth(rightWidget->sizeHint().width());
+
+    stateButtons->addWidget(leftMirror);
+    stateButtons->addStretch(1);
     stateButtons->addWidget(playToggle);
+    stateButtons->addStretch(1);
+    stateButtons->addWidget(rightWidget);
+
     editorLayout->addLayout(stateButtons);
 
     stack->addWidget(startPage);

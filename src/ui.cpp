@@ -11,6 +11,7 @@
 #include <QString>
 #include <QPushButton>
 #include <QTimer>
+#include <QShortcut>
 
 extern "C" {
     #include <libavformat/avformat.h>
@@ -77,24 +78,25 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
     QHBoxLayout *stateButtons = new QHBoxLayout();
     stateButtons->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
 
-    QPushButton* playButton = new QPushButton("▶");
-    playButton->setStyleSheet("color: white; font-size: 15px;");
+    QPushButton* playToggle = new QPushButton("▶");
+    playToggle->setStyleSheet("color: white; font-size: 15px;");
 
-    QObject::connect(playButton, &QPushButton::clicked, [=]() {
-        playerState.isPlaying = true;
-    });
+    auto togglePlay = [playToggle]() {
+        playerState.isPlaying = !playerState.isPlaying;
 
+        if (playerState.isPlaying) {
+            playerState.clockRunning = false;
+        }
 
-    QPushButton* stopButton = new QPushButton("⏸");
-    stopButton->setStyleSheet("color: white; font-size: 15px;");
+        playToggle->setText(playerState.isPlaying ? "⏸" : "▶");
+    };
 
-    QObject::connect(stopButton, &QPushButton::clicked, [=]() {
-        playerState.isPlaying = false;
-        playerState.clockRunning = false;
-    });
+    QObject::connect(playToggle, &QPushButton::clicked, togglePlay);
 
-    stateButtons->addWidget(playButton);
-    stateButtons->addWidget(stopButton);
+    QShortcut *spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), editorPage);
+    QObject::connect(spaceShortcut, &QShortcut::activated, togglePlay);
+
+    stateButtons->addWidget(playToggle);
     editorLayout->addLayout(stateButtons);
 
     stack->addWidget(startPage);

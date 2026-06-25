@@ -85,7 +85,15 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
     playToggle->setStyleSheet("color: white; font-size: 15px;");
 
     auto togglePlay = [playToggle]() {
-        playerState.isPlaying = !playerState.isPlaying;
+        bool wasPlaying = playerState.isPlaying.load();
+
+        if (wasPlaying) {
+            double mediaNow = playerState.mediaTime();
+            playerState.mediaClock.store(mediaNow);
+            playerState.clockRunning = false;
+        }
+
+        playerState.isPlaying = !wasPlaying;
 
         if (playerState.isPlaying) {
             playerState.clockRunning = false;
@@ -114,6 +122,39 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
         volLabel->setText(QString::number(v) + "%");
     });
 
+    QLabel* speedLabel = new QLabel("1.00x");
+    speedLabel->setStyleSheet("color: white; font-size: 15px;");
+    speedLabel->setFixedWidth(speedLabel->sizeHint().width());
+    speedLabel->setContentsMargins(0,0,0,0);
+
+    QSlider *speedSlider = new QSlider(Qt::Horizontal);
+    speedSlider->setRange(25, 400); // 0.25x - 4.0x
+    speedSlider->blockSignals(true);
+    speedSlider->setValue(100);
+    speedSlider->blockSignals(false);
+
+    QObject::connect(speedSlider, &QSlider::valueChanged, [speedLabel](int v){
+        double newSpeed = v / 100.0;
+
+        if (playerState.clockRunning.load()) {
+            double now = playerState.clockRunning.load() ? playerState.wallClock.elapsed() / 1000.0 : 0.0;
+            double last = playerState.lastWallSec.load();
+
+            double oldSpeed = playerState.playbackSpeed.load();
+            double delta = now - last;
+
+            playerState.mediaClock.store(
+                playerState.mediaClock.load() + delta * oldSpeed
+            );
+
+            playerState.lastWallSec = now;
+        }
+
+        playerState.playbackSpeed = newSpeed;
+
+        speedLabel->setText(QString::number(v / 100.0) + "x");
+    });
+
     QWidget *rightWidget = new QWidget();
     QHBoxLayout *rightLayout = new QHBoxLayout(rightWidget);
     rightLayout->setContentsMargins(0,0,0,0);
@@ -121,6 +162,9 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
 
     rightLayout->addWidget(volLabel);
     rightLayout->addWidget(volumeSlider);
+
+    rightLayout->addWidget(speedLabel);
+    rightLayout->addWidget(speedSlider);
     
     rightWidget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
 
@@ -152,17 +196,34 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
         if (!playerState.clockRunning.load()) {
             playerState.startPts = pts;
             playerState.wallClock.restart();
+            playerState.lastWallSec = 0.0;
             playerState.clockRunning = true;
         }
 
         // Only pop when it's time to show this frame
-        double targetSecs  = pts - playerState.startPts.load();
-        double elapsedSecs = playerState.elapsedSecs();
-
-        if (elapsedSecs < targetSecs - 0.002) return; // wait
+        double mediaNow = playerState.mediaTime();
 
         FrameQueue::Entry entry;
-        if (!playerState.frames.pop(entry)) return;
+        bool haveFrame = false;
+
+        while (playerState.frames.peekPts(pts)) {
+            double target = pts - playerState.startPts.load();
+
+            if (target < mediaNow - 0.05) {
+                playerState.frames.pop(entry); // drop old frame
+                continue;
+            }
+
+            if (target > mediaNow) {
+                return;
+            }
+
+            haveFrame = playerState.frames.pop(entry);
+
+            break;
+        }
+
+        if (!haveFrame) return;
 
         videoBox->setPixmap(
             QPixmap::fromImage(entry.img).scaled(
@@ -179,7 +240,7 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
 
         // Stop previous session
         if (renderTimer->isActive()) renderTimer->stop();
-        playerState.reset();
+        playerState.stopRequested = true;
 
         auto stopThread = [](QThread *th) {
             if (th) { th->wait(); delete th; }
@@ -188,6 +249,8 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
         stopThread(demuxTh); demuxTh = nullptr;
         stopThread(videoTh); videoTh = nullptr;
         stopThread(audioTh); audioTh = nullptr;
+        
+        playerState.reset();
 
         if (fmt) avformat_close_input(&fmt);
 
@@ -239,15 +302,15 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
 
         // Start threads
         demuxTh = new DemuxThread();
-        demuxTh->fmt         = fmt;
+        demuxTh->fmt = fmt;
         demuxTh->videoStream = videoStream;
         demuxTh->audioStream = audioStream;
-        demuxTh->state       = &playerState;
+        demuxTh->state = &playerState;
 
         videoTh = new VideoDecodeThread();
-        videoTh->codecCtx  = videoCtx;
-        videoTh->timeBase  = fmt->streams[videoStream]->time_base;
-        videoTh->state     = &playerState;
+        videoTh->codecCtx = videoCtx;
+        videoTh->timeBase = fmt->streams[videoStream]->time_base;
+        videoTh->state = &playerState;
 
         demuxTh->start();
         videoTh->start();
@@ -261,6 +324,25 @@ QWidget* createUI(QMainWindow &window, QLabel *&label) {
 
         renderTimer->start();
         stack->setCurrentIndex(1);
+    });
+
+    QObject::connect(qApp, &QApplication::aboutToQuit, [=]() {
+        if (renderTimer) renderTimer->stop();
+
+        playerState.stopRequested = true;
+        playerState.isPlaying = true;
+
+        playerState.videoPackets.flush();
+        playerState.audioPackets.flush();
+        playerState.frames.flush();
+
+        auto stopThread = [](QThread *th) {
+            if (th) { th->wait(); delete th; }
+        };
+
+        stopThread(demuxTh); demuxTh = nullptr;
+        stopThread(videoTh); videoTh = nullptr;
+        stopThread(audioTh); audioTh = nullptr;
     });
 
     return stack;

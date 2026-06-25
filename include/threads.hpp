@@ -27,7 +27,8 @@ class DemuxThread : public QThread {
 
             while (!state->stopRequested) {
                 if (!state->isPlaying) {
-                    QThread::msleep(5);
+                    double speed = state->playbackSpeed.load();
+                    QThread::msleep(int(5 / std::max(speed, 0.25)));
                     continue;
                 }
 
@@ -68,9 +69,10 @@ class VideoDecodeThread : public QThread {
             uint8_t *buffer = nullptr;
             int lastW = 0, lastH = 0;
 
-            while (true) {
+            while (!state->stopRequested) {
                 if (!state->isPlaying) {
-                    QThread::msleep(5);
+                    double speed = state->playbackSpeed.load();
+                    QThread::msleep(int(5 / std::max(speed, 0.25)));
                     continue;
                 }
 
@@ -162,30 +164,42 @@ public:
 protected:
     void run() override {
         QAudioFormat format;
+
         format.setSampleRate(48000);
         format.setChannelCount(2);
         format.setSampleFormat(QAudioFormat::Int16);
 
-        QAudioSink *sink   = new QAudioSink(format);
-        QIODevice  *device = sink->start();
+        QAudioSink *sink = new QAudioSink(format);
+        QIODevice *device = sink->start();
 
         SwrContext *swr = nullptr;
         AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
+        double lastSwrSpeed = 1.0;
 
-        swr_alloc_set_opts2(
-            &swr,
-            &outLayout, AV_SAMPLE_FMT_S16, 48000,
-            &audioCtx->ch_layout, audioCtx->sample_fmt, audioCtx->sample_rate,
-            0, nullptr
-        );
+        auto rebuildSwr = [&](double speed) {
+            if (swr) swr_free(&swr);
 
-        swr_init(swr);
+            int scaledInRate = (int)(audioCtx->sample_rate * speed);
+
+            swr_alloc_set_opts2(
+                &swr,
+                &outLayout, AV_SAMPLE_FMT_S16, 48000,
+                &audioCtx->ch_layout, audioCtx->sample_fmt, scaledInRate,
+                0, nullptr
+            );
+
+            swr_init(swr);
+            lastSwrSpeed = speed;
+        };
+
+        rebuildSwr(1.0);
 
         AVFrame *af = av_frame_alloc();
 
         while (!state->stopRequested) {
             if (!state->isPlaying) {
-                msleep(5);
+                double speed = state->playbackSpeed.load();
+                QThread::msleep(int(5 / std::max(speed, 0.25)));
                 continue;
             }
 
@@ -211,18 +225,26 @@ protected:
             }
 
             while (avcodec_receive_frame(audioCtx, af) == 0) {
+                double currentSpeed = state->playbackSpeed.load();
+                if (currentSpeed != lastSwrSpeed) {
+                    rebuildSwr(currentSpeed);
+                }
+
                 // Sync
-                if (state->clockRunning) {
+                if (state->clockRunning && !state->stopRequested) {
                     double audioPts = (af->pts != AV_NOPTS_VALUE)
                         ? af->pts * av_q2d(audioCtx->pkt_timebase)
                         : 0.0;
-
+                    
                     double target = audioPts - state->startPts.load();
-                    double elapsed = state->elapsedSecs();
-                    double diffMs = (target - elapsed) * 1000.0;
 
-                    if (diffMs > 5.0) {
-                        msleep(static_cast<unsigned long>(diffMs - 2));
+                    while (state->clockRunning && !state->stopRequested) {
+                        double mediaNow = state->mediaTime();
+                        double diffMs = (target - mediaNow) * 1000.0;
+
+                        if (diffMs <= 5.0) break; // audio is at or behind target, go ahead and write
+
+                        msleep(std::min(diffMs, 10.0));
                     }
                 }
 

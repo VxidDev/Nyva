@@ -22,7 +22,7 @@ struct PacketQueue {
     QMutex mu;
     QWaitCondition notFull;
     QWaitCondition notEmpty;
-    bool flushing = false;
+    std::atomic<bool> flushing{false};
 
     // Push a packet; blocks if full (unless flushing)
     void push(AVPacket *pkt) {
@@ -124,16 +124,14 @@ struct FrameQueue {
     }
 
     void flush() {
-        flushing = true;
-
-        notFull.notify_all();
-        notEmpty.notify_all();
-
         QMutexLocker lk(&mu);
+
+        flushing = true;
 
         while (!q.empty()) q.pop();
 
-        flushing = false;
+        notFull.notify_all();
+        notEmpty.notify_all();
     }
 };
 
@@ -147,6 +145,9 @@ struct PlayerState {
     QElapsedTimer wallClock;
     std::atomic<double> startPts{-1.0};  // PTS seconds of first frame
     std::atomic<bool> clockRunning{false};
+    std::atomic<double> mediaClock{0.0};   // in seconds
+    QElapsedTimer lastUpdate;
+    std::atomic<double> lastWallSec{0.0};
 
     // EOF / stop signals
     std::atomic<bool> demuxDone{false};
@@ -154,8 +155,9 @@ struct PlayerState {
     std::atomic<bool> isPlaying{false};
     std::atomic<bool> audioReset{false};
 
-    // Sound 
-    std::atomic<float> volume = 1.0f;
+    // Sound & Video
+    std::atomic<float> volume{1.0f};
+    std::atomic<double> playbackSpeed{1.0f};
     
     void reset() {
         stopRequested = true;
@@ -171,6 +173,8 @@ struct PlayerState {
         startPts = -1.0;
         isPlaying = false;
         audioReset = false;
+        mediaClock = 0.0;
+        lastWallSec = 0.0;
 
         videoPackets.flushing = false;
         audioPackets.flushing = false;
@@ -180,5 +184,10 @@ struct PlayerState {
     double elapsedSecs() const {
         if (!clockRunning) return 0.0;
         return wallClock.elapsed() / 1000.0;
+    }
+
+    double mediaTime() const {
+        if (!clockRunning) return mediaClock.load();
+        return mediaClock.load() + (elapsedSecs() - lastWallSec.load()) * playbackSpeed.load();
     }
 };

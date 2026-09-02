@@ -1,4 +1,4 @@
-# Nyva
+# Nyva (discontinued)
 
 Nyva is a lightweight, modern video editor being built from scratch using C++ and Qt.
 
